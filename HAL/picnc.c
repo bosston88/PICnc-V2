@@ -67,11 +67,10 @@ static int comp_id;
 static const char *modname = MODNAME;
 static const char *prefix = PREFIX;
 
-static platform_t platform;
 volatile unsigned *mem1, *mem2;
 
 volatile int32_t txBuf[BUFSIZE], rxBuf[BUFSIZE];
-static u32 pwm_period = 0;
+static uint32_t pwm_period = 0;
 
 static double dt = 0,				/* update_freq period in seconds */
 	recip_dt = 0,				/* reciprocal of period, avoids divides */
@@ -81,9 +80,9 @@ static double dt = 0,				/* update_freq period in seconds */
 	old_scale[NUMAXES] = { 0 },
 	max_vel;
 static long old_dtns = 0;			/* update_freq funct period in nsec */
-static s32 accum_diff = 0,
+static int32_t accum_diff = 0,
 	old_count[NUMAXES] = { 0 };
-static s64 accum[NUMAXES] = { 0 };		/* 64 bit DDS accumulator */
+static int64_t accum[NUMAXES] = { 0 };		/* 64 bit DDS accumulator */
 
 static void read_spi(void *arg, long period);
 static void write_spi(void *arg, long period);
@@ -94,69 +93,21 @@ static void (*read_buf)();
 static void (*write_buf)();
 static void rpi_read_buf();
 static void rpi_write_buf();
-static void c1_read_buf();
-static void c1_write_buf();
 static int map_gpio();
 static void (*setup_gpio)();
 static void (*restore_gpio)();
 static void rpi_setup_gpio();
 static void rpi_restore_gpio();
-static void c1_setup_gpio();
-static void c1_restore_gpio();
-
-platform_t check_platform(void)
-{
-	FILE *fp;
-	char buf[2048];
-	size_t fsize;
-
-	fp = fopen("/proc/cpuinfo", "r");
-	fsize = fread(buf, 1, sizeof(buf), fp);
-	fclose(fp);
-	
-	if (fsize == 0 || fsize == sizeof(buf))
-		return 0;
-
-	/* NUL terminate the buffer */
-	buf[fsize] = '\0';
-
-	if (NULL != strstr(buf, "BCM2708"))
-		return RPI;
-	else if (NULL != strstr(buf, "BCM2709"))
-		return RPI_2;
-	else if (NULL != strstr(buf, "ODROIDC"))
-		return ODROID_C1;
-	else
-		return UNSUPPORTED;
-}
 
 int rtapi_app_main(void)
 {
 	char name[HAL_NAME_LEN + 1];
 	int n, retval;
 
-	platform = check_platform();
-
-	switch (platform) {
-	case RPI:
-	case RPI_2:
-		read_buf = rpi_read_buf;
-		write_buf = rpi_write_buf;
-		setup_gpio = rpi_setup_gpio;
-		restore_gpio = rpi_restore_gpio;
-		break;
-	case ODROID_C1:
-		read_buf = c1_read_buf;
-		write_buf = c1_write_buf;
-		setup_gpio = c1_setup_gpio;
-		restore_gpio = c1_restore_gpio;
-		break;
-	default:
-		rtapi_print_msg(RTAPI_MSG_ERR, 
-			"%s: ERROR: This driver is not for this platform.\n",
-		        modname);
-		return -1;
-	}
+	read_buf = rpi_read_buf;
+	write_buf = rpi_write_buf;
+	setup_gpio = rpi_setup_gpio;
+	restore_gpio = rpi_restore_gpio;
 
 	/* initialise driver */
 	comp_id = hal_init(modname);
@@ -542,11 +493,11 @@ void update_outputs(data_t *dat)
 	}
 }
 
-static s32 debounce(s32 A)
+static int32_t debounce(int32_t A)
 {
-	static s32 B = 0;
-	static s32 C = 0;
-	static s32 Z = 0;
+	static int32_t B = 0;
+	static int32_t C = 0;
+	static int32_t Z = 0;
 
 	Z = (Z & (A | B | C)) | (A & B & C);
 	C = B;
@@ -558,7 +509,7 @@ static s32 debounce(s32 A)
 void update_inputs(data_t *dat)
 {
 	int i;
-	s32 x;
+	int32_t x;
 
 	x = debounce(rxBuf[1]);
 
@@ -602,60 +553,19 @@ void rpi_write_buf()
 
 }
 
-void c1_read_buf()
-{
-	u32 *buf;
-	int i;
-
-	/* wait until rx buffer is ready */
-	while (!(ODROID_SPI_STAT & (1<<3)));
-
-	/* read buffer */
-	buf = (u32 *)rxBuf;
-	for (i=0; i<BUFSIZE; i++) {
-		*buf++ = __builtin_bswap32(ODROID_SPI_RX);
-	}
-}
-
-void c1_write_buf()
-{
-	u32 *buf;
-	int i;
-
-	/* copy txBuf */
-	buf = (u32 *)txBuf;
-	for (i=0; i<BUFSIZE; i++) {
-		ODROID_SPI_TX = __builtin_bswap32(*buf++);
-	}
-
- 	/* send tx burst */
-	ODROID_SPI_CON |= (1<<2);
-
-	/* wait until transfer is finished */
-	while (ODROID_SPI_CON & (1<<2));
-}
-
 int map_gpio()
 {
 	int fd;
-	static u32 mem1_base, mem2_base;
+	static uint32_t mem1_base, mem2_base;
 
-	switch (platform) {
-	case RPI:
-		mem1_base = BCM2835_GPIO_BASE;
-		mem2_base = BCM2835_SPI_BASE;
-		break;
-	case RPI_2:
-		mem1_base = BCM2835_GPIO_BASE + BCM2709_OFFSET;
-		mem2_base = BCM2835_SPI_BASE + BCM2709_OFFSET;
-		break;
-	case ODROID_C1:
-		mem1_base = ODROID_GPIO_BASE;
-		mem2_base = ODROID_GCLK_MPEG0;
-		break;
-	}
-
+	mem1_base = BCM2835_GPIO_BASE + BCM2709_OFFSET;
+	mem2_base = BCM2835_SPI_BASE + BCM2709_OFFSET;
+	
+	seteuid(0);
+	setfsuid(geteuid());
 	fd = open("/dev/mem", O_RDWR | O_SYNC);
+	setfsuid(getuid());
+	
 	if (fd < 0) {
 		rtapi_print_msg(RTAPI_MSG_ERR,"%s: can't open /dev/mem \n",modname);
 		return -1;
@@ -708,7 +618,7 @@ int map_gpio()
 
 void rpi_setup_gpio()
 {
-	u32 x;
+	uint32_t x;
 
 	/* change SPI pins */
 	x = BCM2835_GPFSEL0;
@@ -733,7 +643,7 @@ void rpi_setup_gpio()
 
 void rpi_restore_gpio()
 {
-	u32 x;
+	uint32_t x;
 
 	/* change SPI pins to inputs*/
 	x = BCM2835_GPFSEL0;
@@ -743,100 +653,5 @@ void rpi_restore_gpio()
 	x = BCM2835_GPFSEL1;
 	x &= ~(0x0000003F);
 	BCM2835_GPFSEL1 = x;
-
-}
-
-/*    GPIO USAGE
- *
- *    ODROID C1:
- *
- *	GPIO	 Dir	Signal
- *
- *	GPIOX_20 OUT	CE0
- *	GPIOX_9	 IN	MISO
- *	GPIOX_10 OUT	MOSI
- *	GPIOX_8	 OUT	SCLK
- *
- */
-
-void c1_setup_gpio()
-{
-	u32 x;
-
-	/* set SPI direction pins */
-	x = ODROID_GPIOX_OEN;
-	x &= ~(0x00100700);
-	x |= 0x00000200;
-	ODROID_GPIOX_OEN = x;
-
-	/* enable pull-down on all pins */
-	x = ODROID_GPIOX_PUPD;
-	x &= ~(0x00100700);
-	ODROID_GPIOX_PUPD = x;
-
-	/* activate pull-down */
-	x = ODROID_GPIOX_PUEN;
-	x |= 0x00100700;
-	ODROID_GPIOX_PUEN = x;
-
-	/* enable PSI pinmux */
-	ODROID_PPMUX_3 &= ~(0x004003C0);
-	ODROID_PPMUX_5 &= ~(0x00000C00);
-	ODROID_PPMUX_6 &= ~(0x000F0000);
-	ODROID_PPMUX_7 &= ~(0x80000000);
-	ODROID_PPMUX_8 &= ~(0x00000003);
-	ODROID_PPMUX_9 &= ~(0x00080000);
-	ODROID_PPMUX_4 |= 0x03C00000;
-
-	/* enable SPI clk */
-	ODROID_SPI_CLKGATE |= (1<<8);
-	nanosleep((struct timespec[]){{0, 10000}}, NULL);
-
-	/* disable SPI */
-	ODROID_SPI_CON = 0;
-
-	ODROID_SPI_CON = (4<<25) | 	/* 5-1 words/burst */
-			 (31<<19) |	/* 32-1 bits */
-			 (0x3<<16) | 	/* ~4MHz clock rate */
-			 (0<<5) |	/* CKPHA=1 */
-			 (1<<4) |	/* CKPOL=0 */
-			 (1<<1);	/* master */
-
-	/* enable SPI */
-	ODROID_SPI_CON |= 1<<0;
-
-	/* clear SPI RX buffer */
-	int i;
-	for (i=0; i<ODROID_FIFO_SIZE; i++) x = ODROID_SPI_RX;
-
-}
-
-void c1_restore_gpio()
-{
-	u32 x;
-
-	/* disable SPI */
-	ODROID_SPI_CON &= ~(1<<0);
-
-	/* disable SPI clk */
-	ODROID_SPI_CLKGATE &= ~(1<<8);
-
-	/* disable SPI pinmux */
-	ODROID_PPMUX_4 &= ~(0x03C00000);
-
-	/* change all used pins back to inputs */
-	x = ODROID_GPIOX_OEN;
-	x |= 0x00100700;
-	ODROID_GPIOX_OEN = x;
-
-	/* restore pull-up/down to defaults */
-	x = ODROID_GPIOX_PUPD;
-	x &= ~(0x00100000);
-	x |= 0x00000700;
-	ODROID_GPIOX_PUPD = x;
-
-	x = ODROID_GPIOX_PUEN;
-	x |= 0x00100700;
-	ODROID_GPIOX_PUEN = x;
 
 }

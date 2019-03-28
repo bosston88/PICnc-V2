@@ -33,13 +33,6 @@ enum pin_output_names {
 	OUTPUT
 };
 
-typedef enum {
-	UNSUPPORTED,
-	RPI,
-	RPI_2,
-	ODROID_C1
-} platform_t;
-
 #define NUMAXES			4		/* X Y Z A*/
 #define PWMCHANS		3
 #define NUMOUTPUTS		4
@@ -103,32 +96,5 @@ typedef enum {
 #define BCM_SPI_CS_CLEAR_RX	0x00000020
 #define BCM_SPI_CS_CLEAR_TX	0x00000010
 #define BCM_SPI_CS_CPHA		0x00000004
-
-/* Odroid C1 defines */
-
-#define ODROID_FIFO_SIZE	16
-
-#define ODROID_CBUS_PHY_BASE	0xC1100000
-#define ODROID_GPIO_BASE	(ODROID_CBUS_PHY_BASE + 0x8000)
-#define ODROID_GCLK_MPEG0	(ODROID_CBUS_PHY_BASE + 0x4000)
-
-#define ODROID_PPMUX_3		*(mem1 + 0x2F)
-#define ODROID_PPMUX_4		*(mem1 + 0x30)
-#define ODROID_PPMUX_5		*(mem1 + 0x31)
-#define ODROID_PPMUX_6		*(mem1 + 0x32)
-#define ODROID_PPMUX_7		*(mem1 + 0x33)
-#define ODROID_PPMUX_8		*(mem1 + 0x34)
-#define ODROID_PPMUX_9		*(mem1 + 0x35)
-
-#define ODROID_GPIOX_OEN	*(mem1 + 0x0C)
-#define ODROID_GPIOX_PUEN	*(mem1 + 0x4C)
-#define ODROID_GPIOX_PUPD	*(mem1 + 0x3E)
-
-#define ODROID_SPI_RX		*(mem1 + 0x360)
-#define ODROID_SPI_TX		*(mem1 + 0x361)
-#define ODROID_SPI_CON		*(mem1 + 0x362)
-#define ODROID_SPI_STAT		*(mem1 + 0x365)
-
-#define ODROID_SPI_CLKGATE	*(mem2 + 0x50)
 
 #endif
